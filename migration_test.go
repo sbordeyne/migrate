@@ -14,7 +14,7 @@ func ExampleNewMigration() {
 	// Create a new Migration that represents version 1486686016.
 	// Once this migration has been applied to the database, the new
 	// migration version will be 1486689359.
-	migr, err := NewMigration(body, "create_users_table", 1486686016, 1486689359)
+	migr, err := NewMigration(body, "create_users_table", 1486686016, 1486689359, false)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -28,7 +28,7 @@ func ExampleNewMigration_nilMigration() {
 	// Create a new Migration that represents a NilMigration.
 	// Once this migration has been applied to the database, the new
 	// migration version will be 1486689359.
-	migr, err := NewMigration(nil, "", 1486686016, 1486689359)
+	migr, err := NewMigration(nil, "", 1486686016, 1486689359, false)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -45,7 +45,7 @@ func ExampleNewMigration_nilVersion() {
 	// Create a new Migration that represents version 1486686016.
 	// This is the last available down migration, so the migration version
 	// will be -1, meaning NilVersion once this migration ran.
-	migr, err := NewMigration(body, "drop_users_table", 1486686016, -1)
+	migr, err := NewMigration(body, "drop_users_table", 1486686016, -1, false)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -53,4 +53,26 @@ func ExampleNewMigration_nilVersion() {
 	fmt.Print(migr.LogString())
 	// Output:
 	// 1486686016/d drop_users_table
+}
+
+func ExampleNewMigration_template() {
+	// Create a dummy migration body, this is coming from the source usually.
+	body := io.NopCloser(strings.NewReader("dumy migration that creates {{ \"Hello World!\" | base64Encode }} table"))
+
+	// Create a new Migration that represents version 1486686016.
+	// Once this migration has been applied to the database, the new
+	// migration version will be 1486689359.
+	migr, err := NewMigration(body, "create_users_table", 1486686016, 1486689359, true)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	bodyBytes, err := io.ReadAll(migr.Body)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	fmt.Print(string(bodyBytes))
+	// Output:
+	// dumy migration that creates SGVsbG8gV29ybGQh table
 }

@@ -2,11 +2,24 @@ package migrate
 
 import (
 	"bufio"
+	"bytes"
 	"errors"
 	"fmt"
+	"github.com/go-sprout/sprout"
+	"github.com/go-sprout/sprout/group/all"
 	"io"
+	"sync"
+	"text/template"
 	"time"
 )
+
+// templateFuncs returns the sprout function map used to render templated
+// migrations. The handler is built once and reused across migrations.
+var templateFuncs = sync.OnceValue(func() template.FuncMap {
+	handler := sprout.New()
+	handler.AddGroups(all.RegistryGroup())
+	return handler.Build()
+})
 
 // DefaultBufferSize sets the in memory buffer size (in Bytes) for every
 // pre-read migration (see DefaultPrefetchMigrations).
@@ -75,7 +88,7 @@ type Migration struct {
 // last down migration, there is no next down migration, the targetVersion should
 // be nil. Nil in this case is represented by -1 (because type int).
 func NewMigration(body io.ReadCloser, identifier string,
-	version uint, targetVersion int) (*Migration, error) {
+	version uint, targetVersion int, isTemplate bool) (*Migration, error) {
 	tnow := time.Now()
 	m := &Migration{
 		Identifier:    identifier,
@@ -93,6 +106,30 @@ func NewMigration(body io.ReadCloser, identifier string,
 		m.FinishedBuffering = tnow
 		m.FinishedReading = tnow
 		return m, nil
+	}
+
+	if isTemplate {
+		bodyBytes, err := io.ReadAll(body)
+		if err != nil {
+			return nil, fmt.Errorf("failed to read migration body: %w", err)
+		}
+
+		if err := body.Close(); err != nil {
+			return nil, fmt.Errorf("failed to close migration body: %w", err)
+		}
+
+		tmpl, err := template.New("migration").Funcs(templateFuncs()).Parse(string(bodyBytes))
+		if err != nil {
+			return nil, fmt.Errorf("failed to parse migration template: %w", err)
+		}
+
+		var renderedBody bytes.Buffer
+
+		if err := tmpl.Execute(&renderedBody, nil); err != nil {
+			return nil, fmt.Errorf("failed to execute migration template: %w", err)
+		}
+
+		body = io.NopCloser(&renderedBody)
 	}
 
 	br, bw := io.Pipe()
