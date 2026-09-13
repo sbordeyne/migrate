@@ -5,12 +5,14 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
-	"github.com/go-sprout/sprout"
-	"github.com/go-sprout/sprout/group/all"
 	"io"
+	"log/slog"
 	"sync"
 	"text/template"
 	"time"
+
+	"github.com/go-sprout/sprout"
+	"github.com/go-sprout/sprout/group/all"
 )
 
 // templateFuncs returns the sprout function map used to render templated
@@ -18,7 +20,10 @@ import (
 var templateFuncs = sync.OnceValue(func() template.FuncMap {
 	handler := sprout.New()
 	// WARNING: all.RegistryGroup includes env, filesystem, and network helpers; only enable templating for trusted migrations.
-	handler.AddGroups(all.RegistryGroup())
+	if err := handler.AddGroups(all.RegistryGroup()); err != nil {
+		slog.Error(fmt.Sprintf("Failed to add sprout groups: %v", err))
+		return template.FuncMap{}
+	}
 	return handler.Build()
 })
 
@@ -89,7 +94,7 @@ type Migration struct {
 // last down migration, there is no next down migration, the targetVersion should
 // be nil. Nil in this case is represented by -1 (because type int).
 func NewMigration(body io.ReadCloser, identifier string,
-	version uint, targetVersion int, isTemplate bool) (*Migration, error) {
+	version uint, targetVersion int) (*Migration, error) {
 	tnow := time.Now()
 	m := &Migration{
 		Identifier:    identifier,
@@ -109,32 +114,57 @@ func NewMigration(body io.ReadCloser, identifier string,
 		return m, nil
 	}
 
-	if isTemplate {
-		bodyBytes, err := io.ReadAll(body)
-		if err != nil {
-			return nil, fmt.Errorf("failed to read migration body: %w", err)
+	br, bw := io.Pipe()
+	m.Body = body // want to simulate low latency? newSlowReader(body)
+	m.BufferSize = DefaultBufferSize
+	m.BufferedBody = br
+	m.bufferWriter = bw
+	return m, nil
+}
+
+func NewTemplatedMigration(body io.ReadCloser, identifier string,
+	version uint, targetVersion int) (*Migration, error) {
+	tnow := time.Now()
+	m := &Migration{
+		Identifier:    identifier,
+		Version:       version,
+		TargetVersion: targetVersion,
+		Scheduled:     tnow,
+	}
+
+	if body == nil {
+		if len(identifier) == 0 {
+			m.Identifier = "<empty>"
 		}
 
-		if err := body.Close(); err != nil {
-			return nil, fmt.Errorf("failed to close migration body: %w", err)
-		}
+		m.StartedBuffering = tnow
+		m.FinishedBuffering = tnow
+		m.FinishedReading = tnow
+		return m, nil
+	}
 
-		tmpl, err := template.New("migration").Funcs(templateFuncs()).Parse(string(bodyBytes))
-		if err != nil {
-			return nil, fmt.Errorf("failed to parse migration template: %w", err)
-		}
+	bodyBytes, err := io.ReadAll(body)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read migration body: %w", err)
+	}
 
-		var renderedBody bytes.Buffer
+	if err := body.Close(); err != nil {
+		return nil, fmt.Errorf("failed to close migration body: %w", err)
+	}
 
-		if err := tmpl.Execute(&renderedBody, nil); err != nil {
-			return nil, fmt.Errorf("failed to execute migration template: %w", err)
-		}
+	tmpl, err := template.New("migration").Funcs(templateFuncs()).Parse(string(bodyBytes))
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse migration template: %w", err)
+	}
 
-		body = io.NopCloser(&renderedBody)
+	var renderedBody bytes.Buffer
+
+	if err := tmpl.Execute(&renderedBody, nil); err != nil {
+		return nil, fmt.Errorf("failed to execute migration template: %w", err)
 	}
 
 	br, bw := io.Pipe()
-	m.Body = body // want to simulate low latency? newSlowReader(body)
+	m.Body = io.NopCloser(&renderedBody)
 	m.BufferSize = DefaultBufferSize
 	m.BufferedBody = br
 	m.bufferWriter = bw

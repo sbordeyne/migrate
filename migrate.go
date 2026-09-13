@@ -840,7 +840,7 @@ func (m *Migrate) newMigration(version uint, targetVersion int) (*Migration, err
 		r, identifier, err := m.sourceDrv.ReadUp(version)
 		if errors.Is(err, os.ErrNotExist) {
 			// create "empty" migration
-			migr, err = NewMigration(nil, "", version, targetVersion, false)
+			migr, err = NewMigration(nil, "", version, targetVersion)
 			if err != nil {
 				return nil, err
 			}
@@ -850,7 +850,11 @@ func (m *Migrate) newMigration(version uint, targetVersion int) (*Migration, err
 
 		} else {
 			// create migration from up source
-			migr, err = NewMigration(r, identifier, version, targetVersion, m.EnableTemplating)
+			if m.EnableTemplating {
+				migr, err = NewTemplatedMigration(r, identifier, version, targetVersion)
+			} else {
+				migr, err = NewMigration(r, identifier, version, targetVersion)
+			}
 			if err != nil {
 				return nil, err
 			}
@@ -860,7 +864,7 @@ func (m *Migrate) newMigration(version uint, targetVersion int) (*Migration, err
 		r, identifier, err := m.sourceDrv.ReadDown(version)
 		if errors.Is(err, os.ErrNotExist) {
 			// create "empty" migration
-			migr, err = NewMigration(nil, "", version, targetVersion, false)
+			migr, err = NewMigration(nil, "", version, targetVersion)
 			if err != nil {
 				return nil, err
 			}
@@ -870,7 +874,11 @@ func (m *Migrate) newMigration(version uint, targetVersion int) (*Migration, err
 
 		} else {
 			// create migration from down source
-			migr, err = NewMigration(r, identifier, version, targetVersion, m.EnableTemplating)
+			if m.EnableTemplating {
+				migr, err = NewTemplatedMigration(r, identifier, version, targetVersion)
+			} else {
+				migr, err = NewMigration(r, identifier, version, targetVersion)
+			}
 			if err != nil {
 				return nil, err
 			}
