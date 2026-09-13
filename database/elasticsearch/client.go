@@ -127,12 +127,14 @@ func (c *client) resolve(ref *url.URL) (*url.URL, error) {
 	return &u, nil
 }
 
-// IsUnder reports whether the cleaned path p is base itself or sits below it.
+// isUnder reports whether p is base itself or sits below it.
+// p is cleaned before the prefix check so callers don't need to pre-clean it.
 func isUnder(p, base string) bool {
 	base = strings.TrimSuffix(base, "/")
 	if base == "" {
 		return true
 	}
+	p = path.Clean("/" + strings.TrimPrefix(p, "/"))
 	return p == base || strings.HasPrefix(p, base+"/")
 }
 
