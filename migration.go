@@ -17,6 +17,7 @@ import (
 // migrations. The handler is built once and reused across migrations.
 var templateFuncs = sync.OnceValue(func() template.FuncMap {
 	handler := sprout.New()
+	// WARNING: all.RegistryGroup includes env, filesystem, and network helpers; only enable templating for trusted migrations.
 	handler.AddGroups(all.RegistryGroup())
 	return handler.Build()
 })
