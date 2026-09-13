@@ -24,6 +24,9 @@ import (
 )
 
 const esPort = 9200
+const httpScheme = "http"
+const httpsScheme = "https"
+const baseEsURL = httpScheme + "://es:9200"
 
 var (
 	opts = dktest.Options{
@@ -461,11 +464,11 @@ func TestResolve(t *testing.T) {
 		path     string
 		expected string
 	}{
-		{name: "root", base: "http://es:9200", path: "/", expected: "http://es:9200/"},
-		{name: "index", base: "http://es:9200", path: "/books", expected: "http://es:9200/books"},
+		{name: "root", base: baseEsURL, path: "/", expected: baseEsURL + "/"},
+		{name: "index", base: baseEsURL, path: "/books", expected: baseEsURL + "/books"},
 		{
-			name: "query string", base: "http://es:9200", path: "/books/_doc/1?refresh=true",
-			expected: "http://es:9200/books/_doc/1?refresh=true",
+			name: "query string", base: baseEsURL, path: "/books/_doc/1?refresh=true",
+			expected: baseEsURL + "/books/_doc/1?refresh=true",
 		},
 		{
 			name: "path prefix", base: "http://proxy:8080/es", path: "/books/_doc/1?refresh=true",
@@ -475,10 +478,10 @@ func TestResolve(t *testing.T) {
 			name: "path prefix with trailing slash", base: "http://proxy:8080/es/", path: "/books",
 			expected: "http://proxy:8080/es/books",
 		},
-		{name: "wildcard", base: "http://es:9200", path: "/drop_me_*", expected: "http://es:9200/drop_me_*"},
+		{name: "wildcard", base: baseEsURL, path: "/drop_me_*", expected: baseEsURL + "/drop_me_*"},
 		{
-			name: "escaped path", base: "http://es:9200", path: "/books/_doc/a%2Fb",
-			expected: "http://es:9200/books/_doc/a%2Fb",
+			name: "escaped path", base: baseEsURL, path: "/books/_doc/a%2Fb",
+			expected: baseEsURL + "/books/_doc/a%2Fb",
 		},
 	}
 
@@ -505,7 +508,7 @@ func TestResolve(t *testing.T) {
 }
 
 func TestResolveRejectsAbsoluteURLs(t *testing.T) {
-	base, err := url.Parse("http://es:9200")
+	base, err := url.Parse(baseEsURL)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -520,6 +523,91 @@ func TestResolveRejectsAbsoluteURLs(t *testing.T) {
 	}
 }
 
+// TestResolveRejectsTraversal checks that a request path cannot climb out of
+// the path prefix the cluster url points at, which on a shared host would aim
+// the request at a different service.
+func TestResolveRejectsTraversal(t *testing.T) {
+	testCases := []struct {
+		name string
+		base string
+		path string
+	}{
+		{name: "parent of prefix", base: "http://proxy:8080/es", path: "/../kibana/api/status"},
+		{name: "climbs past root", base: "http://proxy:8080/es", path: "/../../etc/passwd"},
+		{name: "traversal mid path", base: "http://proxy:8080/es", path: "/books/../../kibana"},
+		{name: "relative traversal", base: "http://proxy:8080/es", path: "../kibana"},
+		{name: "encoded traversal", base: "http://proxy:8080/es", path: "/%2e%2e/kibana"},
+		{name: "sibling prefix", base: "http://proxy:8080/es", path: "/../esoteric"},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			base, err := url.Parse(tc.base)
+			if err != nil {
+				t.Fatal(err)
+			}
+			ref, err := url.Parse(tc.path)
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			got, err := newClient(nil, base).resolve(ref)
+			if err == nil {
+				t.Fatalf("expected an error, got %q", got)
+			}
+		})
+	}
+}
+
+// TestResolveAllowsTraversalWithinPrefix checks that a ".." that stays under
+// the cluster url is resolved rather than rejected.
+func TestResolveAllowsTraversalWithinPrefix(t *testing.T) {
+	testCases := []struct {
+		name     string
+		base     string
+		path     string
+		expected string
+	}{
+		{
+			name: "back to prefix root", base: "http://proxy:8080/es", path: "/books/..",
+			expected: "http://proxy:8080/es",
+		},
+		{
+			name: "sibling index", base: "http://proxy:8080/es", path: "/books/../films",
+			expected: "http://proxy:8080/es/films",
+		},
+		{
+			name: "no prefix", base: baseEsURL, path: "/books/../films",
+			expected: baseEsURL + "/films",
+		},
+		{
+			name: "no prefix climbing past root", base: baseEsURL, path: "/../books",
+			expected: baseEsURL + "/books",
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			base, err := url.Parse(tc.base)
+			if err != nil {
+				t.Fatal(err)
+			}
+			ref, err := url.Parse(tc.path)
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			got, err := newClient(nil, base).resolve(ref)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got.String() != tc.expected {
+				t.Errorf("got %q, expected %q", got, tc.expected)
+			}
+		})
+	}
+}
+
 // TestOpenSchemes checks that every registered scheme is rewritten to the
 // transport it stands for, rather than reaching the http client as written.
 func TestOpenSchemes(t *testing.T) {
@@ -527,10 +615,10 @@ func TestOpenSchemes(t *testing.T) {
 		scheme   string
 		expected string
 	}{
-		{scheme: "elasticsearch", expected: "http"},
-		{scheme: "elasticsearch+http", expected: "http"},
-		{scheme: "elasticsearchs", expected: "https"},
-		{scheme: "elasticsearch+https", expected: "https"},
+		{scheme: "elasticsearch", expected: httpScheme},
+		{scheme: "elasticsearch+http", expected: httpScheme},
+		{scheme: "elasticsearchs", expected: httpsScheme},
+		{scheme: "elasticsearch+https", expected: httpsScheme},
 	}
 
 	for _, tc := range testCases {
@@ -542,7 +630,7 @@ func TestOpenSchemes(t *testing.T) {
 
 			// Only the rewrite is under test, so https is checked against the
 			// url the driver built instead of a tls handshake.
-			if tc.expected == "https" {
+			if tc.expected == httpsScheme {
 				clusterURL, err := url.Parse(tc.scheme + "://es:9200/")
 				if err != nil {
 					t.Fatal(err)
@@ -596,7 +684,7 @@ func TestDeleteBatched(t *testing.T) {
 		t.Fatalf("got %d requests, expected the names to be split across several", len(paths))
 	}
 
-	var sent []string
+	sent := make([]string, 0, len(paths))
 	for _, p := range paths {
 		if len(p) > deleteURIBudget {
 			t.Errorf("got a request path of %d bytes, expected at most %d", len(p), deleteURIBudget)

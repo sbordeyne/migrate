@@ -8,6 +8,8 @@ import (
 	"testing"
 )
 
+const testPath = "/books"
+
 // expectedRequest describes a parsed request in the terms the migration file
 // is written in.
 type expectedRequest struct {
@@ -92,7 +94,7 @@ func TestParseRequests(t *testing.T) {
 			input: "# create the index\n// and nothing else\nPUT /books\n",
 			expected: []expectedRequest{{
 				method: http.MethodPut,
-				path:   "/books",
+				path:   testPath,
 				header: http.Header{},
 				line:   3,
 			}},
@@ -101,9 +103,9 @@ func TestParseRequests(t *testing.T) {
 			name:  "several requests",
 			input: "PUT /books\n\n{\"a\": 1}\n---\nDELETE /books\n---\n\nHEAD /books\n",
 			expected: []expectedRequest{
-				{method: http.MethodPut, path: "/books", header: http.Header{}, body: "{\"a\": 1}\n", line: 1},
-				{method: http.MethodDelete, path: "/books", header: http.Header{}, line: 5},
-				{method: http.MethodHead, path: "/books", header: http.Header{}, line: 8},
+				{method: http.MethodPut, path: testPath, header: http.Header{}, body: "{\"a\": 1}\n", line: 1},
+				{method: http.MethodDelete, path: testPath, header: http.Header{}, line: 5},
+				{method: http.MethodHead, path: testPath, header: http.Header{}, line: 8},
 			},
 		},
 		{
@@ -147,7 +149,7 @@ func TestParseRequests(t *testing.T) {
 			input: "GET /books\nX-Thing: a\nX-Thing: b\n",
 			expected: []expectedRequest{{
 				method: http.MethodGet,
-				path:   "/books",
+				path:   testPath,
 				header: http.Header{"X-Thing": []string{"a", "b"}},
 				line:   1,
 			}},

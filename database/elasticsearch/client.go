@@ -116,12 +116,24 @@ func (c *client) resolve(ref *url.URL) (*url.URL, error) {
 
 	u := *c.baseURL
 	u.Path = path.Join(c.baseURL.Path, ref.Path)
+	if !isUnder(u.Path, c.baseURL.Path) {
+		return nil, fmt.Errorf("request path %q escapes the cluster url path %q", ref, c.baseURL.Path)
+	}
 	// The path is also carried in its original encoding, so that characters Go
 	// would otherwise escape reach the cluster as written. Index patterns such
 	// as "*" are legal in a uri path and Elasticsearch expects them unescaped.
 	u.RawPath = path.Join(c.baseURL.EscapedPath(), ref.EscapedPath())
 	u.RawQuery = ref.RawQuery
 	return &u, nil
+}
+
+// IsUnder reports whether the cleaned path p is base itself or sits below it.
+func isUnder(p, base string) bool {
+	base = strings.TrimSuffix(base, "/")
+	if base == "" {
+		return true
+	}
+	return p == base || strings.HasPrefix(p, base+"/")
 }
 
 func (c *client) ping() error {
